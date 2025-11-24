@@ -31,6 +31,24 @@ SCHEMA = os.getenv("CORTEX_AGENT_DEMO_SCHEMA", "AGENTS")
 AGENT = os.getenv("CORTEX_AGENT_DEMO_AGENT", "SALES_INTELLIGENCE_AGENT")
 
 
+# -----------------------------
+# New: Helper to append Qlik filters
+# -----------------------------
+def append_filters_to_prompt(prompt: str, filters: dict) -> str:
+    """
+    Appends Qlik dashboard filters to the user prompt.
+    Example: 
+        "What is total sales?" + {"Country":"US"} 
+        -> "What is total sales? [Country=US]"
+    """
+    if not filters:
+        return prompt
+    filter_str = " ".join(
+        f"[{k}={v if not isinstance(v,list) else ','.join(v)}]" for k,v in filters.items()
+    )
+    return f"{prompt} {filter_str}"
+
+
 def agent_run() -> requests.Response:
     """Calls the REST API and returns a streaming client."""
     request_body = DataAgentRunRequest(
@@ -118,10 +136,20 @@ def stream_events(response: requests.Response):
     spinner.__exit__(None, None, None)
 
 
+# -----------------------------
+# Updated: process_new_message to include Qlik filters
+# -----------------------------
 def process_new_message(prompt: str) -> None:
+    # Get Qlik filters stored in session_state
+    filters = st.session_state.get("qlik_filters", {})
+
+    # Append filters to the user prompt
+    full_prompt = append_filters_to_prompt(prompt, filters)
+
+    # Create message with filters included
     message = Message(
         role="user",
-        content=[MessageContentItem(TextContentItem(type="text", text=prompt))],
+        content=[MessageContentItem(TextContentItem(type="text", text=full_prompt))],
     )
     render_message(message)
     st.session_state.messages.append(message)
@@ -161,11 +189,26 @@ def render_message(msg: Message):
 
 st.title("Cortex Agent")
 
+# -----------------------------
+# Initialize messages
+# -----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# -----------------------------
+# Render previous messages
+# -----------------------------
 for message in st.session_state.messages:
     render_message(message)
 
+# -----------------------------
+# Optional: placeholder for receiving filters from Qlik iframe JS
+# Example using streamlit_javascript:
+# st.session_state['qlik_filters'] = filters received from JS
+# -----------------------------
+
+# -----------------------------
+# Chat input
+# -----------------------------
 if user_input := st.chat_input("What is your question?"):
     process_new_message(prompt=user_input)
