@@ -35,8 +35,6 @@ AGENT = os.getenv("CORTEX_AGENT_DEMO_AGENT", "SALES_INTELLIGENCE_AGENT")
 if "qlik_filters" not in st.session_state:
     st.session_state.qlik_filters = []
 
-# Create a small endpoint inside Streamlit to receive filters
-st.experimental_singleton.clear()  # clear any old endpoint
 
 def get_filters():
     if st.experimental_get_query_params().get("filters"):
