@@ -91,7 +91,9 @@ def stream_events(response: requests.Response):
             case "response.thinking.delta":
                 data = ThinkingDeltaEventData.from_json(event.data)
                 buffers[data.content_index] += data.text
-                content_map[data.content_index].expander("Thinking", expanded=True).write(buffers[data.content_index])
+                content_map[data.content_index].expander("Thinking", expanded=True).write(
+                    buffers[data.content_index]
+                )
             case "response.thinking":
                 data = ThinkingDeltaEventData.from_json(event.data)
                 content_map[data.content_index].expander("Thinking").write(data.text)
@@ -108,8 +110,13 @@ def stream_events(response: requests.Response):
             case "response.table":
                 data = TableEventData.from_json(event.data)
                 data_array = np.array(data.result_set.data)
-                column_names = [col.name for col in data.result_set.result_set_meta_data.row_type]
-                content_map[data.content_index].dataframe(pd.DataFrame(data_array, columns=column_names))
+                column_names = [
+                    col.name
+                    for col in data.result_set.result_set_meta_data.row_type
+                ]
+                content_map[data.content_index].dataframe(
+                    pd.DataFrame(data_array, columns=column_names)
+                )
             case "error":
                 data = ErrorEventData.from_json(event.data)
                 st.error(f"Error: {data.message} (code: {data.code})")
@@ -124,57 +131,78 @@ def stream_events(response: requests.Response):
 # Process user message (with live filters)
 # ------------------------------
 def process_new_message(user_prompt: str):
+
     # Fetch latest Qlik filters via POST
     try:
         resp = requests.post(AZURE_FUNCTION_URL, json={"filters": []})
         if resp.status_code == 200:
-            data = resp.json()
-            st.session_state.qlik_filters = data.get("filters", [])
+            raw_data = resp.json()
+            raw_filters = raw_data.get("filters", [])
         else:
-            st.session_state.qlik_filters = []
+            raw_filters = []
     except Exception:
-        st.session_state.qlik_filters = []
+        raw_filters = []
 
-    # Construct full prompt with filters
+    # ------------------------------
+    # Normalize filter values correctly
+    # ------------------------------
+    normalized_filters = []
+
+    for f in raw_filters:
+        if not isinstance(f, dict):
+            continue
+
+        field = f.get("field", "unknown")
+        values = f.get("values", [])
+
+        # Handle "HR, Finance"
+        if isinstance(values, str):
+            values = [v.strip() for v in values.split(",") if v.strip()]
+
+        # Always ensure list
+        if not isinstance(values, list):
+            values = [values]
+
+        # Skip empty
+        if not values:
+            continue
+
+        normalized_filters.append({"field": field, "values": values})
+
+    # Save filters in session
+    st.session_state.qlik_filters = normalized_filters
+
+    # ------------------------------
+    # Build full user prompt including filters
+    # ------------------------------
     full_prompt = user_prompt
 
-    if st.session_state.qlik_filters:
-        filter_text_list = []
+    if normalized_filters:
+        filter_descriptions = []
+        for f in normalized_filters:
+            flist = ", ".join(f["values"])
+            filter_descriptions.append(f"{f['field']}: {flist}")
 
-        for f in st.session_state.qlik_filters:
-            if not isinstance(f, dict):
-                continue
+        filter_block = "; ".join(filter_descriptions)
+        full_prompt = f"{user_prompt} [{filter_block}]"
 
-            field = f.get("field", "unknown")
-            values = f.get("values", [])
-
-            if isinstance(values, str):
-                values = [v.strip() for v in values.split(",")]
-
-            if not values:
-                continue
-
-            filter_text_list.append(f"{field}: {', '.join(values)}")
-
-        if filter_text_list:
-            filter_text = "; ".join(filter_text_list)
-            full_prompt = f"{user_prompt} [{filter_text}]"
-
-    # Create message with full prompt
+    # ------------------------------
+    # Send to agent
+    # ------------------------------
     message = Message(
         role="user",
         content=[MessageContentItem(TextContentItem(type="text", text=full_prompt))],
     )
     st.session_state.messages.append(message)
 
-    # Render user message
     render_message(message)
 
-    # Send to agent
     with st.chat_message("assistant"):
         with st.spinner("Sending request..."):
             response = agent_run(st.session_state.messages)
-        st.markdown(f"```request_id: {response.headers.get('X-Snowflake-Request-Id')}```")
+        st.markdown(
+            f"```request_id: {response.headers.get('X-Snowflake-Request-Id')}```"
+        )
         stream_events(response)
 
 # ------------------------------
@@ -190,11 +218,18 @@ def render_message(msg: Message):
                     spec = json.loads(content_item.actual_instance.chart.chart_spec)
                     st.vega_lite_chart(spec, use_container_width=True)
                 case "table":
-                    data_array = np.array(content_item.actual_instance.table.result_set.data)
-                    column_names = [col.name for col in content_item.actual_instance.table.result_set.result_set_meta_data.row_type]
+                    data_array = (
+                        np.array(content_item.actual_instance.table.result_set.data)
+                    )
+                    column_names = [
+                        col.name
+                        for col in content_item.actual_instance.table.result_set.result_set_meta_data.row_type
+                    ]
                     st.dataframe(pd.DataFrame(data_array, columns=column_names))
                 case _:
-                    st.expander(content_item.actual_instance.type).json(content_item.actual_instance.to_json())
+                    st.expander(content_item.actual_instance.type).json(
+                        content_item.actual_instance.to_json()
+                    )
 
 # ------------------------------
 # Streamlit UI
