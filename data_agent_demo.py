@@ -40,6 +40,9 @@ AZURE_FUNCTION_URL = "https://qlik-filters-backend-dna9eke8e9gbewda.eastus-01.az
 if "qlik_filters" not in st.session_state:
     st.session_state.qlik_filters = []
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 # ------------------------------
 # Agent call
 # ------------------------------
@@ -132,10 +135,8 @@ def process_new_message(user_prompt: str):
     except Exception:
         st.session_state.qlik_filters = []
 
-    # Construct display and agent prompts
-    display_prompt = user_prompt
-    agent_prompt = user_prompt
-
+    # Construct full prompt with filters
+    full_prompt = user_prompt
     if st.session_state.qlik_filters:
         filter_text_list = []
         for f in st.session_state.qlik_filters:
@@ -144,21 +145,21 @@ def process_new_message(user_prompt: str):
                 values = [v.strip() for v in values.split(',')]
             filter_text_list.append(f"{f['field']}: {', '.join(values)}")
         filter_text = "; ".join(filter_text_list)
-        display_prompt = f"{user_prompt} [{filter_text}]"
-        agent_prompt = display_prompt
+        full_prompt = f"{user_prompt} [{filter_text}]"
 
-    # Render user message
+    # Create message with full prompt
     message = Message(
         role="user",
-        content=[MessageContentItem(TextContentItem(type="text", text=display_prompt))],
+        content=[MessageContentItem(TextContentItem(type="text", text=full_prompt))],
     )
-    render_message(message)
     st.session_state.messages.append(message)
+
+    # Render user message
+    render_message(message)
 
     # Send to agent
     with st.chat_message("assistant"):
         with st.spinner("Sending request..."):
-            st.session_state.messages[-1].content[0].actual_instance.text = agent_prompt
             response = agent_run(st.session_state.messages)
         st.markdown(f"```request_id: {response.headers.get('X-Snowflake-Request-Id')}```")
         stream_events(response)
@@ -186,9 +187,6 @@ def render_message(msg: Message):
 # Streamlit UI
 # ------------------------------
 st.title("Cortex Agent")
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 
 for msg in st.session_state.messages:
     render_message(msg)
