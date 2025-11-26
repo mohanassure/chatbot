@@ -137,20 +137,28 @@ def process_new_message(user_prompt: str):
 
     # Construct full prompt with filters
     full_prompt = user_prompt
+
     if st.session_state.qlik_filters:
         filter_text_list = []
+
         for f in st.session_state.qlik_filters:
-            if isinstance(f, dict):
-                values = f.get("values", [])
-                if isinstance(values, str):
-                    values = [v.strip() for v in values.split(',')]
-                field = f.get("field", "unknown")
-            else:  # f is a string
-                values = [f]
-                field = "unknown"
+            if not isinstance(f, dict):
+                continue
+
+            field = f.get("field", "unknown")
+            values = f.get("values", [])
+
+            if isinstance(values, str):
+                values = [v.strip() for v in values.split(",")]
+
+            if not values:
+                continue
+
             filter_text_list.append(f"{field}: {', '.join(values)}")
-        filter_text = "; ".join(filter_text_list)
-        full_prompt = f"{user_prompt} [{filter_text}]"
+
+        if filter_text_list:
+            filter_text = "; ".join(filter_text_list)
+            full_prompt = f"{user_prompt} [{filter_text}]"
 
     # Create message with full prompt
     message = Message(
