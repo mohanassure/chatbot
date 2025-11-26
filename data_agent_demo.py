@@ -23,12 +23,18 @@ from models import (
     ToolUseEventData,
 )
 
+# ------------------------------
+# Environment variables
+# ------------------------------
 PAT = os.getenv("CORTEX_AGENT_DEMO_PAT")
 HOST = os.getenv("CORTEX_AGENT_DEMO_HOST")
 DATABASE = os.getenv("CORTEX_AGENT_DEMO_DATABASE", "SNOWFLAKE_INTELLIGENCE")
 SCHEMA = os.getenv("CORTEX_AGENT_DEMO_SCHEMA", "AGENTS")
 AGENT = os.getenv("CORTEX_AGENT_DEMO_AGENT", "SALES_INTELLIGENCE_AGENT")
 
+# ------------------------------
+# Azure Function URL to fetch Qlik filters
+# ------------------------------
 AZURE_FUNCTION_URL = "https://qlik-filters-backend-dna9eke8e9gbewda.eastus-01.azurewebsites.net/api/FiltersFunction?code=UuAmdppxRSEKRAOQVAcW6zwz-DaV0iHUZTMEuqfkA5LPAzFujnzhfA=="
 
 if "qlik_filters" not in st.session_state:
@@ -82,9 +88,7 @@ def stream_events(response: requests.Response):
             case "response.thinking.delta":
                 data = ThinkingDeltaEventData.from_json(event.data)
                 buffers[data.content_index] += data.text
-                content_map[data.content_index].expander(
-                    "Thinking", expanded=True
-                ).write(buffers[data.content_index])
+                content_map[data.content_index].expander("Thinking", expanded=True).write(buffers[data.content_index])
             case "response.thinking":
                 data = ThinkingDeltaEventData.from_json(event.data)
                 content_map[data.content_index].expander("Thinking").write(data.text)
@@ -114,10 +118,10 @@ def stream_events(response: requests.Response):
     spinner.__exit__(None, None, None)
 
 # ------------------------------
-# Process user message (fetch filters live)
+# Process user message (with live filters)
 # ------------------------------
 def process_new_message(user_prompt: str):
-    # Fetch latest filters at the moment user submits
+    # Fetch latest Qlik filters
     try:
         resp = requests.get(AZURE_FUNCTION_URL)
         if resp.status_code == 200:
@@ -125,29 +129,36 @@ def process_new_message(user_prompt: str):
             st.session_state.qlik_filters = data.get("filters", [])
         else:
             st.session_state.qlik_filters = []
-    except Exception as e:
+    except Exception:
         st.session_state.qlik_filters = []
 
-    # Append filters to prompt
+    # Construct display and agent prompts
+    display_prompt = user_prompt
+    agent_prompt = user_prompt
+
     if st.session_state.qlik_filters:
         filter_text_list = []
         for f in st.session_state.qlik_filters:
             values = f['values']
             if isinstance(values, str):
                 values = [v.strip() for v in values.split(',')]
-            filter_text_list.append(f"{f['field']} IN ({', '.join(values)})")
+            filter_text_list.append(f"{f['field']}: {', '.join(values)}")
         filter_text = "; ".join(filter_text_list)
-        user_prompt = f"{user_prompt} [APPLY FILTERS: {filter_text}]"
+        display_prompt = f"{user_prompt} [{filter_text}]"
+        agent_prompt = display_prompt
 
+    # Render user message
     message = Message(
         role="user",
-        content=[MessageContentItem(TextContentItem(type="text", text=user_prompt))],
+        content=[MessageContentItem(TextContentItem(type="text", text=display_prompt))],
     )
     render_message(message)
     st.session_state.messages.append(message)
 
+    # Send to agent
     with st.chat_message("assistant"):
         with st.spinner("Sending request..."):
+            st.session_state.messages[-1].content[0].actual_instance.text = agent_prompt
             response = agent_run(st.session_state.messages)
         st.markdown(f"```request_id: {response.headers.get('X-Snowflake-Request-Id')}```")
         stream_events(response)
