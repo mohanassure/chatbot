@@ -23,14 +23,18 @@ from models import (
     ToolUseEventData,
 )
 
+# ------------------------------
 # Environment variables
+# ------------------------------
 PAT = os.getenv("CORTEX_AGENT_DEMO_PAT")
 HOST = os.getenv("CORTEX_AGENT_DEMO_HOST")
 DATABASE = os.getenv("CORTEX_AGENT_DEMO_DATABASE", "SNOWFLAKE_INTELLIGENCE")
 SCHEMA = os.getenv("CORTEX_AGENT_DEMO_SCHEMA", "AGENTS")
 AGENT = os.getenv("CORTEX_AGENT_DEMO_AGENT", "SALES_INTELLIGENCE_AGENT")
 
+# ------------------------------
 # Azure Function URL to fetch Qlik filters
+# ------------------------------
 AZURE_FUNCTION_URL = "https://qlik-filters-backend-dna9eke8e9gbewda.eastus-01.azurewebsites.net/api/FiltersFunction?code=UuAmdppxRSEKRAOQVAcW6zwz-DaV0iHUZTMEuqfkA5LPAzFujnzhfA=="
 
 if "qlik_filters" not in st.session_state:
@@ -39,7 +43,9 @@ if "qlik_filters" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# ------------------------------
 # Agent call
+# ------------------------------
 def agent_run(prompt_messages) -> requests.Response:
     request_body = DataAgentRunRequest(
         model="claude-4-sonnet",
@@ -60,7 +66,9 @@ def agent_run(prompt_messages) -> requests.Response:
     else:
         raise Exception(f"Failed request with status {resp.status_code}: {resp.text}")
 
+# ------------------------------
 # Stream response events
+# ------------------------------
 def stream_events(response: requests.Response):
     content = st.container()
     content_map = defaultdict(content.empty)
@@ -112,14 +120,15 @@ def stream_events(response: requests.Response):
                 st.session_state.messages.append(data)
     spinner.__exit__(None, None, None)
 
+# ------------------------------
 # Process user message (with live filters)
+# ------------------------------
 def process_new_message(user_prompt: str):
-    # Fetch latest Qlik filters using POST to ensure proper JSON structure
+    # Fetch latest Qlik filters via POST
     try:
-        resp = requests.post(AZURE_FUNCTION_URL, json={"filters":[]})
+        resp = requests.post(AZURE_FUNCTION_URL, json={"filters": []})
         if resp.status_code == 200:
             data = resp.json()
-            # Safely get filters, default to empty list if missing
             st.session_state.qlik_filters = data.get("filters", [])
         else:
             st.session_state.qlik_filters = []
@@ -131,11 +140,14 @@ def process_new_message(user_prompt: str):
     if st.session_state.qlik_filters:
         filter_text_list = []
         for f in st.session_state.qlik_filters:
-            # Safely extract values and field
-            values = f.get("values", [])
-            if isinstance(values, str):
-                values = [v.strip() for v in values.split(',')]
-            field = f.get("field", "unknown")
+            if isinstance(f, dict):
+                values = f.get("values", [])
+                if isinstance(values, str):
+                    values = [v.strip() for v in values.split(',')]
+                field = f.get("field", "unknown")
+            else:  # f is a string
+                values = [f]
+                field = "unknown"
             filter_text_list.append(f"{field}: {', '.join(values)}")
         filter_text = "; ".join(filter_text_list)
         full_prompt = f"{user_prompt} [{filter_text}]"
@@ -157,7 +169,9 @@ def process_new_message(user_prompt: str):
         st.markdown(f"```request_id: {response.headers.get('X-Snowflake-Request-Id')}```")
         stream_events(response)
 
+# ------------------------------
 # Render previous messages
+# ------------------------------
 def render_message(msg: Message):
     with st.chat_message(msg.role):
         for content_item in msg.content:
@@ -174,7 +188,9 @@ def render_message(msg: Message):
                 case _:
                     st.expander(content_item.actual_instance.type).json(content_item.actual_instance.to_json())
 
+# ------------------------------
 # Streamlit UI
+# ------------------------------
 st.title("Cortex Agent")
 
 for msg in st.session_state.messages:
