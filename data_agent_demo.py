@@ -30,21 +30,28 @@ SCHEMA = os.getenv("CORTEX_AGENT_DEMO_SCHEMA", "AGENTS")
 AGENT = os.getenv("CORTEX_AGENT_DEMO_AGENT", "SALES_INTELLIGENCE_AGENT")
 
 # ------------------------------
-# Capture Qlik Filters POSTed via Azure Function
+# Capture Qlik Filters via Azure Function
 # ------------------------------
+AZURE_FUNCTION_URL = "https://qlik-filters-backend-dna9eke8e9gbewda.eastus-01.azurewebsites.net/api/FiltersFunction?code=UuAmdppxRSEKRAOQVAcW6zwz-DaV0iHUZTMEuqfkA5LPAzFujnzhfA=="  # <-- update this
+
 if "qlik_filters" not in st.session_state:
     st.session_state.qlik_filters = []
 
 def get_filters():
-    """Read the latest filters saved by Azure Function."""
+    """Fetch the latest Qlik filters directly from Azure Function."""
     try:
-        with open("/tmp/latest_filters.json", "r") as f:
-            st.session_state.qlik_filters = json.load(f)
-    except FileNotFoundError:
-        st.session_state.qlik_filters = []
+        resp = requests.get(AZURE_FUNCTION_URL)
+        if resp.status_code == 200:
+            data = resp.json()
+            st.session_state.qlik_filters = data.get("filters", [])
+        else:
+            st.session_state.qlik_filters = []
+            st.warning(f"Failed to fetch filters: {resp.status_code}")
     except Exception as e:
-        st.warning(f"Failed to read Qlik filters: {e}")
+        st.session_state.qlik_filters = []
+        st.warning(f"Error fetching filters: {e}")
 
+# Fetch filters at startup
 get_filters()
 
 # ------------------------------
@@ -100,7 +107,7 @@ def stream_events(response: requests.Response):
                     "Thinking", expanded=True
                 ).write(buffers[data.content_index])
             case "response.thinking":
-                data = ThinkingEventData.from_json(event.data)
+                data = ThinkingDeltaEventData.from_json(event.data)
                 content_map[data.content_index].expander("Thinking").write(data.text)
             case "response.tool_use":
                 data = ToolUseEventData.from_json(event.data)
