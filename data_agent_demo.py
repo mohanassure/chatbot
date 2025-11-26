@@ -29,25 +29,10 @@ DATABASE = os.getenv("CORTEX_AGENT_DEMO_DATABASE", "SNOWFLAKE_INTELLIGENCE")
 SCHEMA = os.getenv("CORTEX_AGENT_DEMO_SCHEMA", "AGENTS")
 AGENT = os.getenv("CORTEX_AGENT_DEMO_AGENT", "SALES_INTELLIGENCE_AGENT")
 
-# ------------------------------
-# Capture Qlik Filters via Azure Function (POST)
-# ------------------------------
 AZURE_FUNCTION_URL = "https://qlik-filters-backend-dna9eke8e9gbewda.eastus-01.azurewebsites.net/api/FiltersFunction?code=UuAmdppxRSEKRAOQVAcW6zwz-DaV0iHUZTMEuqfkA5LPAzFujnzhfA=="
 
 if "qlik_filters" not in st.session_state:
     st.session_state.qlik_filters = []
-
-def send_filters_to_function(filters):
-    """Directly POST filters to Azure Function from Qlik."""
-    try:
-        resp = requests.post(AZURE_FUNCTION_URL, json=filters)
-        if resp.status_code == 200:
-            data = resp.json()
-            st.session_state.qlik_filters = data.get("received_filters", [])
-        else:
-            st.warning(f"Failed to send filters: {resp.status_code}")
-    except Exception as e:
-        st.warning(f"Error sending filters: {e}")
 
 # ------------------------------
 # Agent call
@@ -112,19 +97,12 @@ def stream_events(response: requests.Response):
             case "response.chart":
                 data = ChartEventData.from_json(event.data)
                 spec = json.loads(data.chart_spec)
-                content_map[data.content_index].vega_lite_chart(
-                    spec,
-                    use_container_width=True,
-                )
+                content_map[data.content_index].vega_lite_chart(spec, use_container_width=True)
             case "response.table":
                 data = TableEventData.from_json(event.data)
                 data_array = np.array(data.result_set.data)
-                column_names = [
-                    col.name for col in data.result_set.result_set_meta_data.row_type
-                ]
-                content_map[data.content_index].dataframe(
-                    pd.DataFrame(data_array, columns=column_names)
-                )
+                column_names = [col.name for col in data.result_set.result_set_meta_data.row_type]
+                content_map[data.content_index].dataframe(pd.DataFrame(data_array, columns=column_names))
             case "error":
                 data = ErrorEventData.from_json(event.data)
                 st.error(f"Error: {data.message} (code: {data.code})")
@@ -136,14 +114,30 @@ def stream_events(response: requests.Response):
     spinner.__exit__(None, None, None)
 
 # ------------------------------
-# Process user message
+# Process user message (fetch filters live)
 # ------------------------------
 def process_new_message(user_prompt: str):
+    # Fetch latest filters at the moment user submits
+    try:
+        resp = requests.get(AZURE_FUNCTION_URL)
+        if resp.status_code == 200:
+            data = resp.json()
+            st.session_state.qlik_filters = data.get("filters", [])
+        else:
+            st.session_state.qlik_filters = []
+    except Exception as e:
+        st.session_state.qlik_filters = []
+
+    # Append filters to prompt
     if st.session_state.qlik_filters:
-        filter_text = ", ".join(
-            [f"{f['field']} = {', '.join(f['values'])}" for f in st.session_state.qlik_filters]
-        )
-        user_prompt = f"{user_prompt} [Filters applied: {filter_text}]"
+        filter_text_list = []
+        for f in st.session_state.qlik_filters:
+            values = f['values']
+            if isinstance(values, str):
+                values = [v.strip() for v in values.split(',')]
+            filter_text_list.append(f"{f['field']} IN ({', '.join(values)})")
+        filter_text = "; ".join(filter_text_list)
+        user_prompt = f"{user_prompt} [APPLY FILTERS: {filter_text}]"
 
     message = Message(
         role="user",
@@ -155,9 +149,7 @@ def process_new_message(user_prompt: str):
     with st.chat_message("assistant"):
         with st.spinner("Sending request..."):
             response = agent_run(st.session_state.messages)
-        st.markdown(
-            f"```request_id: {response.headers.get('X-Snowflake-Request-Id')}```"
-        )
+        st.markdown(f"```request_id: {response.headers.get('X-Snowflake-Request-Id')}```")
         stream_events(response)
 
 # ------------------------------
@@ -173,18 +165,11 @@ def render_message(msg: Message):
                     spec = json.loads(content_item.actual_instance.chart.chart_spec)
                     st.vega_lite_chart(spec, use_container_width=True)
                 case "table":
-                    data_array = np.array(
-                        content_item.actual_instance.table.result_set.data
-                    )
-                    column_names = [
-                        col.name
-                        for col in content_item.actual_instance.table.result_set.result_set_meta_data.row_type
-                    ]
+                    data_array = np.array(content_item.actual_instance.table.result_set.data)
+                    column_names = [col.name for col in content_item.actual_instance.table.result_set.result_set_meta_data.row_type]
                     st.dataframe(pd.DataFrame(data_array, columns=column_names))
                 case _:
-                    st.expander(content_item.actual_instance.type).json(
-                        content_item.actual_instance.to_json()
-                    )
+                    st.expander(content_item.actual_instance.type).json(content_item.actual_instance.to_json())
 
 # ------------------------------
 # Streamlit UI
