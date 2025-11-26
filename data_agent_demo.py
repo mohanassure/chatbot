@@ -30,35 +30,29 @@ SCHEMA = os.getenv("CORTEX_AGENT_DEMO_SCHEMA", "AGENTS")
 AGENT = os.getenv("CORTEX_AGENT_DEMO_AGENT", "SALES_INTELLIGENCE_AGENT")
 
 # ------------------------------
-# Capture Qlik Filters via Azure Function
+# Capture Qlik Filters via Azure Function (POST)
 # ------------------------------
-AZURE_FUNCTION_URL = "https://qlik-filters-backend-dna9eke8e9gbewda.eastus-01.azurewebsites.net/api/FiltersFunction?code=UuAmdppxRSEKRAOQVAcW6zwz-DaV0iHUZTMEuqfkA5LPAzFujnzhfA=="  # <-- update this
+AZURE_FUNCTION_URL = "https://qlik-filters-backend-dna9eke8e9gbewda.eastus-01.azurewebsites.net/api/FiltersFunction?code=UuAmdppxRSEKRAOQVAcW6zwz-DaV0iHUZTMEuqfkA5LPAzFujnzhfA=="
 
 if "qlik_filters" not in st.session_state:
     st.session_state.qlik_filters = []
 
-def get_filters():
-    """Fetch the latest Qlik filters directly from Azure Function."""
+def send_filters_to_function(filters):
+    """Directly POST filters to Azure Function from Qlik."""
     try:
-        resp = requests.get(AZURE_FUNCTION_URL)
+        resp = requests.post(AZURE_FUNCTION_URL, json=filters)
         if resp.status_code == 200:
             data = resp.json()
-            st.session_state.qlik_filters = data.get("filters", [])
+            st.session_state.qlik_filters = data.get("received_filters", [])
         else:
-            st.session_state.qlik_filters = []
-            st.warning(f"Failed to fetch filters: {resp.status_code}")
+            st.warning(f"Failed to send filters: {resp.status_code}")
     except Exception as e:
-        st.session_state.qlik_filters = []
-        st.warning(f"Error fetching filters: {e}")
-
-# Fetch filters at startup
-get_filters()
+        st.warning(f"Error sending filters: {e}")
 
 # ------------------------------
 # Agent call
 # ------------------------------
 def agent_run(prompt_messages) -> requests.Response:
-    """Calls the REST API and returns a streaming client."""
     request_body = DataAgentRunRequest(
         model="claude-4-sonnet",
         messages=prompt_messages,
@@ -74,7 +68,7 @@ def agent_run(prompt_messages) -> requests.Response:
         verify=False,
     )
     if resp.status_code < 400:
-        return resp  # type: ignore
+        return resp
     else:
         raise Exception(f"Failed request with status {resp.status_code}: {resp.text}")
 
@@ -145,7 +139,6 @@ def stream_events(response: requests.Response):
 # Process user message
 # ------------------------------
 def process_new_message(user_prompt: str):
-    # If filters exist, append them to user prompt
     if st.session_state.qlik_filters:
         filter_text = ", ".join(
             [f"{f['field']} = {', '.join(f['values'])}" for f in st.session_state.qlik_filters]
