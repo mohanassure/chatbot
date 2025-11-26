@@ -124,9 +124,9 @@ def stream_events(response: requests.Response):
 # Process user message (with live filters)
 # ------------------------------
 def process_new_message(user_prompt: str):
-    # Fetch latest Qlik filters
+    # Fetch latest Qlik filters via POST
     try:
-        resp = requests.get(AZURE_FUNCTION_URL)
+        resp = requests.post(AZURE_FUNCTION_URL, json={"filters": []})
         if resp.status_code == 200:
             data = resp.json()
             st.session_state.qlik_filters = data.get("filters", [])
