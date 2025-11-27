@@ -55,7 +55,7 @@ def agent_run(prompt_messages) -> requests.Response:
         url=f"https://{HOST}/api/v2/databases/{DATABASE}/schemas/{SCHEMA}/agents/{AGENT}:run",
         data=request_body.to_json(),
         headers={
-            "Authorization": f'Bearer {PAT}"',
+            "Authorization": f"Bearer {PAT}",  # Fixed extra quote
             "Content-Type": "application/json",
         },
         stream=True,
@@ -132,63 +132,40 @@ def stream_events(response: requests.Response):
 # ------------------------------
 def process_new_message(user_prompt: str):
 
-    # Fetch latest Qlik filters via POST
+    # ----- Fetch latest filters from Azure Function -----
     try:
-        resp = requests.post(AZURE_FUNCTION_URL, json={"filters": []})
-        if resp.status_code == 200:
-            raw_data = resp.json()
-            raw_filters = raw_data.get("filters", [])
-        else:
-            raw_filters = []
+        resp = requests.post(AZURE_FUNCTION_URL, json={})  # Added empty JSON body
+        raw_data = resp.json()
+        raw_filters = raw_data.get("filters", [])
     except Exception:
         raw_filters = []
 
-    # ------------------------------
-    # Normalize filter values correctly
-    # ------------------------------
+    # Normalize filters
     normalized_filters = []
-
     for f in raw_filters:
         if not isinstance(f, dict):
             continue
-
         field = f.get("field", "unknown")
-        values = f.get("values", [])
+        values = f.get("values") or f.get("selectedValues") or []  # fallback keys
 
-        # Handle "HR, Finance"
         if isinstance(values, str):
             values = [v.strip() for v in values.split(",") if v.strip()]
-
-        # Always ensure list
-        if not isinstance(values, list):
+        elif not isinstance(values, list):
             values = [values]
 
-        # Skip empty
-        if not values:
-            continue
+        if values:
+            normalized_filters.append({"field": field, "values": values})
 
-        normalized_filters.append({"field": field, "values": values})
-
-    # Save filters in session
+    # Save in session
     st.session_state.qlik_filters = normalized_filters
 
-    # ------------------------------
-    # Build full user prompt including filters
-    # ------------------------------
+    # ----- Build final prompt -----
     full_prompt = user_prompt
-
     if normalized_filters:
-        filter_descriptions = []
-        for f in normalized_filters:
-            flist = ", ".join(f["values"])
-            filter_descriptions.append(f"{f['field']}: {flist}")
+        parts = [f"{f['field']}: {', '.join(f['values'])}" for f in normalized_filters]
+        full_prompt = f"{user_prompt} [{'; '.join(parts)}]"
 
-        filter_block = "; ".join(filter_descriptions)
-        full_prompt = f"{user_prompt} [{filter_block}]"
-
-    # ------------------------------
-    # Send to agent
-    # ------------------------------
+    # Send message to agent
     message = Message(
         role="user",
         content=[MessageContentItem(TextContentItem(type="text", text=full_prompt))],
@@ -204,6 +181,7 @@ def process_new_message(user_prompt: str):
             f"```request_id: {response.headers.get('X-Snowflake-Request-Id')}```"
         )
         stream_events(response)
+
 
 # ------------------------------
 # Render previous messages
