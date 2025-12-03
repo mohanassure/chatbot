@@ -55,7 +55,7 @@ def agent_run(prompt_messages) -> requests.Response:
         url=f"https://{HOST}/api/v2/databases/{DATABASE}/schemas/{SCHEMA}/agents/{AGENT}:run",
         data=request_body.to_json(),
         headers={
-            "Authorization": f"Bearer {PAT}",  # Fixed extra quote
+            "Authorization": f"Bearer {PAT}",
             "Content-Type": "application/json",
         },
         stream=True,
@@ -134,7 +134,7 @@ def process_new_message(user_prompt: str):
 
     # ----- Fetch latest filters from Azure Function -----
     try:
-        resp = requests.post(AZURE_FUNCTION_URL, json={})  # Added empty JSON body
+        resp = requests.post(AZURE_FUNCTION_URL, json={})
         raw_data = resp.json()
         raw_filters = raw_data.get("filters", [])
     except Exception:
@@ -146,7 +146,7 @@ def process_new_message(user_prompt: str):
         if not isinstance(f, dict):
             continue
         field = f.get("field", "unknown")
-        values = f.get("values") or f.get("selectedValues") or []  # fallback keys
+        values = f.get("values") or f.get("selectedValues") or []
 
         if isinstance(values, str):
             values = [v.strip() for v in values.split(",") if v.strip()]
@@ -156,14 +156,16 @@ def process_new_message(user_prompt: str):
         if values:
             normalized_filters.append({"field": field, "values": values})
 
-    # Save in session
     st.session_state.qlik_filters = normalized_filters
 
-    # ----- Build final prompt -----
+    # ----- Build final prompt with SQL WHERE clause -----
     full_prompt = user_prompt
     if normalized_filters:
-        parts = [f"{f['field']}: {', '.join(f['values'])}" for f in normalized_filters]
-        full_prompt = f"{user_prompt} [{'; '.join(parts)}]"
+        where_clauses = []
+        for f in normalized_filters:
+            values_sql = ", ".join([f"'{v}'" for v in f["values"]])
+            where_clauses.append(f"{f['field']} IN ({values_sql})")
+        full_prompt = f"{user_prompt}. Apply filters: {' AND '.join(where_clauses)}"
 
     # Send message to agent
     message = Message(
@@ -181,7 +183,6 @@ def process_new_message(user_prompt: str):
             f"```request_id: {response.headers.get('X-Snowflake-Request-Id')}```"
         )
         stream_events(response)
-
 
 # ------------------------------
 # Render previous messages
