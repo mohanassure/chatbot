@@ -158,14 +158,15 @@ def process_new_message(user_prompt: str):
 
     st.session_state.qlik_filters = normalized_filters
 
-    # ----- Build final prompt with SQL WHERE clause -----
+    # ----- Build final prompt with SQL-style filter -----
     full_prompt = user_prompt
     if normalized_filters:
         where_clauses = []
         for f in normalized_filters:
             values_sql = ", ".join([f"'{v}'" for v in f["values"]])
             where_clauses.append(f"{f['field']} IN ({values_sql})")
-        full_prompt = f"{user_prompt}. Apply filters: {' AND '.join(where_clauses)}"
+        # Append directly without extra text
+        full_prompt = f"{user_prompt} {' AND '.join(where_clauses)}"
 
     # Send message to agent
     message = Message(
